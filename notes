@@ -1,0 +1,10 @@
+Components
+
+1. Min-Heap Index
+2. Scheduler   
+
+AckLevel: Timestamp to which the job has been executed
+ReadLevel: Timestamp to which the job has been loaded into memory on the min-Heap
+
+
+All time stamp will be stored or tranformed from any timestamp format to RFC3339
