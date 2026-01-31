@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"heap"
-	"sync"
 	"time"
 )
 
@@ -19,14 +18,6 @@ type Scheduler interface {
 	jobExecutor()
 	Start() error
 	Stop()
-}
-
-type scheduler struct {
-	ReadLevel  time.Time
-	AckLevel   time.Time
-	jobMinHeap heap.heap
-	wg         *sync.WaitGroup
-	stopChan   chan bool
 }
 
 func InitialiseScheduler(timeWindow int) Scheduler {
