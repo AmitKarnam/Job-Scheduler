@@ -26,6 +26,7 @@ type scheduler struct {
 	AckLevel   time.Time
 	jobMinHeap heap.heap
 	wg         *sync.WaitGroup
+	mu         sync.Mutex
 	stopChan   chan bool
 }
 
