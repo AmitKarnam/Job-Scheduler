@@ -8,3 +8,17 @@ ReadLevel: Timestamp to which the job has been loaded into memory on the min-Hea
 
 
 All time stamp will be stored or tranformed from any timestamp format to RFC3339
+
+V0.0.1 - Release Scope
+    1. Only support for One time job
+    2. Focus on building the core job-scheduler logic
+    3. Setting up the required CI pipeline
+        a. AI Review Bot for PR - Done
+        b. Test and Build pipeline
+    4. Branch rules
+        a. PR must be reviewed by at least 2 reviewers
+        b. PR must pass all the tests before merging    
+    5. Release pipeline and documentation
+        a. Using tag based release, where the tag will be in format v0.0.1, v0.0.2 and so on
+        b. Generate release notes using AI based on the merged PRs since last release
+    6. No Database integration in this release, all data will be stored in memory

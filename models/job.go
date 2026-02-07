@@ -185,16 +185,15 @@ func (s CronSchedule) Type() ScheduleType { return ScheduleCron }
 
 // Job is the canonical job definition used across the scheduler.
 type Job struct {
-	ID         string                 `json:"id"`
-	Type       JobType                `json:"type"`
-	Schedule   Schedule               `json:"-"` // interface; JSON marshalling requires a helper
-	Payload    map[string]interface{} `json:"payload,omitempty"`
-	RetryCount int                    `json:"retry_count"`
-	MaxRetries int                    `json:"max_retries"`
-	Status     Status                 `json:"status"`
-	LastError  string                 `json:"last_error,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
+	ID                string                 `json:"id"`
+	Type              JobType                `json:"type"`
+	Schedule          Schedule               `json:"-"` // interface; JSON marshalling requires a helper
+	Payload           map[string]interface{} `json:"payload,omitempty"`
+	NextExecutionTime time.Time              `json:"next_execution_time"` // computed next run time for scheduling
+	Status            Status                 `json:"status"`
+	LastError         string                 `json:"last_error,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
 // NextRun returns the next scheduled execution time after the provided time.

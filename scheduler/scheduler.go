@@ -1,9 +1,10 @@
 package scheduler
 
 import (
-	"heap"
 	"sync"
 	"time"
+
+	"github.com/AmitKarnam/Job-Scheduler/heap"
 )
 
 const (
@@ -14,17 +15,17 @@ const (
 )
 
 type Scheduler interface {
-	buildHeap(readLevel, ackLevel string) heap.heap
+	buildHeap(readLevel, ackLevel string) heap.Heap
 	monitorAckLevelandReadLevel()
 	jobExecutor()
-	Start() error
+	Start()
 	Stop()
 }
 
 type scheduler struct {
 	ReadLevel  time.Time
 	AckLevel   time.Time
-	jobMinHeap heap.heap
+	jobMinHeap heap.Heap
 	wg         *sync.WaitGroup
 	stopChan   chan bool
 }
@@ -38,7 +39,7 @@ func InitialiseScheduler(timeWindow int) Scheduler {
 	return &scheduler{
 		ReadLevel:  readLevel,
 		AckLevel:   ackLevel,
-		jobMinHeap: heap.Heap{},
+		jobMinHeap: heap.NewHeap(),
 	}
 }
 
@@ -79,10 +80,10 @@ func (s *scheduler) jobExecutor() {
 	// keep track of the current top of the heap, sleep for next_execution - current_time ;
 	// Execute the job ; update it's next_execution_time and remove the node off the heap
 	// Trigger is the wake up??
-	// Initial trigger is the Start method?
+	// Initial trigger is the Start method? - Yes
 }
 
-func (s *scheduler) Start() error {
+func (s *scheduler) Start() {
 	// Use ack level and read level to create a min-heap
 	// Case 1: The ReadLevel and AckLevel are empty ( new instance of job scheduler ): Set both of them to current timestamp; load the min-heap with the jobs that execute within next 'N' time units
 	if s.AckLevel.IsZero() && s.ReadLevel.IsZero() {
@@ -98,8 +99,13 @@ func (s *scheduler) Start() error {
 	// Move the AckLevel and ReadLevel after the above step to their correct timestamp => Flush to DB
 	// Start jobExecutor as a go-routine
 	// Start monitorAckLevelandReadLevel as a go routine
-	jobExecutor()
-	return nil
+	s.buildHeap(s.ReadLevel.Format("2006-01-02T15:04:05Z"), s.AckLevel.Format("2006-01-02T15:04:05Z"))
+	s.wg.Add(2)
+	go s.jobExecutor()
+	go s.monitorAckLevelandReadLevel()
+	s.wg.Wait()
+
+	return
 
 }
 
