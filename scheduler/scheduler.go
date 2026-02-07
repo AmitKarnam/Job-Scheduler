@@ -77,10 +77,27 @@ func (s *scheduler) monitorAckLevelandReadLevel() {
 }
 
 func (s *scheduler) jobExecutor() {
-	// keep track of the current top of the heap, sleep for next_execution - current_time ;
-	// Execute the job ; update it's next_execution_time and remove the node off the heap
-	// Trigger is the wake up??
-	// Initial trigger is the Start method? - Yes
+	defer s.wg.Done()
+
+	for {
+		jobToExecute := s.jobMinHeap.Peak()
+
+		select {
+		//TODO: Case if a new job is added to the heap with an earlier execution time than the current job at the top of the heap, how to handle that? - We can add a new channel to the scheduler struct called 'heapUpdateChan' and whenever a new job is added to the heap, we can send a signal to that channel. In the jobExecutor, we can listen to that channel and if we receive a signal, we can re-evaluate the top of the heap and adjust the sleep time accordingly.
+		case <-s.stopChan:
+			return
+		case <-time.After(time.Until(jobToExecute.NextExecutionTime)):
+			// Execute the job
+			err := jobToExecute.Execute()
+			if err != nil {
+				// Handle error (e.g., log it, retry logic, etc.)
+			}
+			s.jobMinHeap.DeleteMin() // Remove the executed job from the heap
+			//TODO: If the job is recurring, compute its next execution time and update the DB entry for that job; It will be automatically be picked up by the monitorAckLevelandReadLevel and added to the heap when it's next_execution_time is within the ReadLevel and ReadLevel + window
+			return
+		}
+	}
+
 }
 
 func (s *scheduler) Start() {
