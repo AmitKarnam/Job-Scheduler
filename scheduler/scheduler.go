@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AmitKarnam/Job-Scheduler/heap"
+	"github.com/AmitKarnam/Job-Scheduler/models"
 )
 
 const (
@@ -50,8 +51,9 @@ func loadAckLevelAndReadLevel() (time.Time, time.Time) {
 }
 
 // buildHeap is a initialiser method that help to build the initial in memory min-heap based on teh execution window ( 'N' ) time window
-func (s *scheduler) buildHeap(readLevel, ackLevel string) heap.Heap {
-	return heap.Heap
+func (s *scheduler) buildHeap(readLevel, ackLevel time.Time) heap.Heap {
+	// Build heap based on the readLevel and ackLevel; Fetch the jobs from database that are scheduled to be executed between readLevel and readLevel + TimeWindow; Insert those jobs into the heap; Return the heap
+	return heap.NewHeap()
 }
 
 func (s *scheduler) monitorAckLevelandReadLevel() {
@@ -69,8 +71,13 @@ func (s *scheduler) monitorAckLevelandReadLevel() {
 			return
 		case <-ticker.C:
 			// Load jobs from DB between ReadLevel and ReadLevel + window
+			jobsToBeAdded := fetchJobsFromDB(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
 			// Insert into heap
+			for _, job := range jobsToBeAdded {
+				s.jobMinHeap.Insert(job)
+			}
 			// Update ReadLevel in DB
+			s.ReadLevel = s.ReadLevel.Add(TimeWindow)
 		}
 	}
 
@@ -104,10 +111,15 @@ func (s *scheduler) Start() {
 	// Use ack level and read level to create a min-heap
 	// Case 1: The ReadLevel and AckLevel are empty ( new instance of job scheduler ): Set both of them to current timestamp; load the min-heap with the jobs that execute within next 'N' time units
 	if s.AckLevel.IsZero() && s.ReadLevel.IsZero() {
+		s.AckLevel = time.Now().UTC()
+		s.ReadLevel = time.Now().UTC()
+		// Load the min-heap with the jobs that execute within next 'N' time units
+		s.buildHeap(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
 
 	}
 	// Case 2: ReadLevel and AckLevel are far in the past from current time ( Job scheduler crash or stopped ): Load all the jobs from the AckLevel to the current timestamp ( should thier execution be taken care by a seperate worker? ), Load all the jobs from current timestamp + 'N' time units
-	if s.AckLevel < time.Now().Format() {
+	if s.AckLevel.Before(time.Now()) && s.ReadLevel.Before(time.Now()) {
+
 		// Load all the jobs in the from AckLevel to current time.
 		// Async: Start the backlog job worker to execute the jobs in backlog
 		// Set current time as AckLevel and ReadLevel; Start loadin jobs from current time to next 'N' minutes
@@ -129,4 +141,9 @@ func (s *scheduler) Start() {
 func (s *scheduler) Stop() {
 	// Need to understand more on the behaviour and handle accordingly
 	close(s.stopChan)
+}
+
+func fetchJobsFromDB(readLevel time.Time, maxTime time.Time) []models.Job {
+	// Ideally run a DB query with next_execution_time as index and fetch all the jobs within the window readLevela nd maxTime
+	return []models.Job{}
 }
