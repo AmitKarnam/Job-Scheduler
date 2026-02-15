@@ -1,11 +1,13 @@
 package scheduler
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/AmitKarnam/Job-Scheduler/heap"
 	"github.com/AmitKarnam/Job-Scheduler/models"
+	"github.com/AmitKarnam/Job-Scheduler/worker/backlog"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 )
 
 type Scheduler interface {
-	buildHeap(readLevel, ackLevel string) heap.Heap
+	buildHeap(readLevel, ackLevel time.Time) heap.Heap
 	monitorAckLevelandReadLevel()
 	jobExecutor()
 	Start()
@@ -57,9 +59,6 @@ func (s *scheduler) buildHeap(readLevel, ackLevel time.Time) heap.Heap {
 }
 
 func (s *scheduler) monitorAckLevelandReadLevel() {
-	// Get current time and ReadLevel
-	// If current time is 2-minutes less than ReadLevel; Populate the heap with data from ReadLevel to next 'N' minutes
-	// What's the trigger?? => How will know when to fire
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(LookAheadTimeWindow)
@@ -98,6 +97,7 @@ func (s *scheduler) jobExecutor() {
 			err := jobToExecute.Execute()
 			if err != nil {
 				// Handle error (e.g., log it, retry logic, etc.)
+				fmt.Printf("Error executing job: %v\n", err)
 			}
 			s.jobMinHeap.DeleteMin() // Remove the executed job from the heap
 			//TODO: If the job is recurring, compute its next execution time and update the DB entry for that job; It will be automatically be picked up by the monitorAckLevelandReadLevel and added to the heap when it's next_execution_time is within the ReadLevel and ReadLevel + window
@@ -113,22 +113,38 @@ func (s *scheduler) Start() {
 	if s.AckLevel.IsZero() && s.ReadLevel.IsZero() {
 		s.AckLevel = time.Now().UTC()
 		s.ReadLevel = time.Now().UTC()
-		// Load the min-heap with the jobs that execute within next 'N' time units
-		s.buildHeap(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
-
 	}
 	// Case 2: ReadLevel and AckLevel are far in the past from current time ( Job scheduler crash or stopped ): Load all the jobs from the AckLevel to the current timestamp ( should thier execution be taken care by a seperate worker? ), Load all the jobs from current timestamp + 'N' time units
 	if s.AckLevel.Before(time.Now()) && s.ReadLevel.Before(time.Now()) {
-
 		// Load all the jobs in the from AckLevel to current time.
 		// Async: Start the backlog job worker to execute the jobs in backlog
 		// Set current time as AckLevel and ReadLevel; Start loadin jobs from current time to next 'N' minutes
+
+		// List of backlog jobs
+		backlogJobList := []models.Job{}
+
+		backlogJobWorker := backlog.NewJobBacklogWorker()
+
+		backlogJobWorker.Process()
+
+		for _, backlogJob := range backlogJobList {
+			backlogJobWorker.Add(backlogJob)
+		}
+
+		backlogJobWorker.Stop()
+
+		s.ReadLevel = time.Now().UTC()
+		s.AckLevel = time.Now().UTC()
 	}
 	// Case 3: ReadLevel or AckLevel are in the future; Alert for a drifted system clock; Ask users to sync clock; Provide instructions; Exit
+	if s.AckLevel.After(time.Now()) || s.ReadLevel.After(time.Now()) {
+		fmt.Println("System clock is drifted. Please sync your clock with an NTP server and restart the scheduler.")
+		return
+	}
 	// Move the AckLevel and ReadLevel after the above step to their correct timestamp => Flush to DB
 	// Start jobExecutor as a go-routine
 	// Start monitorAckLevelandReadLevel as a go routine
-	s.buildHeap(s.ReadLevel.Format("2006-01-02T15:04:05Z"), s.AckLevel.Format("2006-01-02T15:04:05Z"))
+	s.buildHeap(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
 	s.wg.Add(2)
 	go s.jobExecutor()
 	go s.monitorAckLevelandReadLevel()
