@@ -7,6 +7,7 @@ import (
 
 	"github.com/AmitKarnam/Job-Scheduler/heap"
 	"github.com/AmitKarnam/Job-Scheduler/models"
+	"github.com/AmitKarnam/Job-Scheduler/repository"
 	"github.com/AmitKarnam/Job-Scheduler/worker/backlog"
 )
 
@@ -17,32 +18,31 @@ const (
 	LookAheadTimeWindow = 3 * time.Minute
 )
 
-type Scheduler interface {
-	buildHeap(readLevel, ackLevel time.Time) heap.Heap
-	monitorAckLevelandReadLevel()
-	jobExecutor()
+type SchedulerService interface {
 	Start()
 	Stop()
 }
 
 type scheduler struct {
-	ReadLevel  time.Time
-	AckLevel   time.Time
+	readLevel  time.Time
+	ackLevel   time.Time
 	jobMinHeap heap.Heap
+	jobRepo    repository.JobRepo
 	wg         *sync.WaitGroup
 	stopChan   chan bool
 }
 
-func InitialiseScheduler(timeWindow int) Scheduler {
+func InitialiseScheduler(jobRepo *repository.JobRepo) SchedulerService {
 	// All the following logic is one time initialisation, once the scheduler is intialised, we use it's attributes to make the updates
 	// read Acklevel from database
 	// read Acklevel from database
 	ackLevel, readLevel := loadAckLevelAndReadLevel()
 	// return the scheduler with empty jobMinheap, then when the scheduler is started populate it.
 	return &scheduler{
-		ReadLevel:  readLevel,
-		AckLevel:   ackLevel,
+		readLevel:  readLevel,
+		ackLevel:   ackLevel,
 		jobMinHeap: heap.NewHeap(),
+		jobRepo:    *jobRepo,
 	}
 }
 
@@ -70,13 +70,13 @@ func (s *scheduler) monitorAckLevelandReadLevel() {
 			return
 		case <-ticker.C:
 			// Load jobs from DB between ReadLevel and ReadLevel + window
-			jobsToBeAdded := fetchJobsFromDB(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
+			jobsToBeAdded := fetchJobsFromDB(s.readLevel, s.readLevel.Add(TimeWindow))
 			// Insert into heap
 			for _, job := range jobsToBeAdded {
 				s.jobMinHeap.Insert(job)
 			}
 			// Update ReadLevel in DB
-			s.ReadLevel = s.ReadLevel.Add(TimeWindow)
+			s.readLevel = s.readLevel.Add(TimeWindow)
 		}
 	}
 
@@ -88,10 +88,22 @@ func (s *scheduler) jobExecutor() {
 	for {
 		jobToExecute := s.jobMinHeap.Peak()
 
+		// handling empty job
+		if jobToExecute.NextExecutionTime.IsZero() {
+			select {
+			case <-s.stopChan:
+				return
+			case <-time.After(1 * time.Second):
+				// periodic recheck if any job was added
+				continue
+			}
+		}
+
 		select {
 		//TODO: Case if a new job is added to the heap with an earlier execution time than the current job at the top of the heap, how to handle that? - We can add a new channel to the scheduler struct called 'heapUpdateChan' and whenever a new job is added to the heap, we can send a signal to that channel. In the jobExecutor, we can listen to that channel and if we receive a signal, we can re-evaluate the top of the heap and adjust the sleep time accordingly.
 		case <-s.stopChan:
 			return
+		// TODO: This flow of job execution should be async in nature
 		case <-time.After(time.Until(jobToExecute.NextExecutionTime)):
 			// Execute the job
 			err := jobToExecute.Execute()
@@ -108,14 +120,8 @@ func (s *scheduler) jobExecutor() {
 }
 
 func (s *scheduler) Start() {
-	// Use ack level and read level to create a min-heap
-	// Case 1: The ReadLevel and AckLevel are empty ( new instance of job scheduler ): Set both of them to current timestamp; load the min-heap with the jobs that execute within next 'N' time units
-	if s.AckLevel.IsZero() && s.ReadLevel.IsZero() {
-		s.AckLevel = time.Now().UTC()
-		s.ReadLevel = time.Now().UTC()
-	}
-	// Case 2: ReadLevel and AckLevel are far in the past from current time ( Job scheduler crash or stopped ): Load all the jobs from the AckLevel to the current timestamp ( should thier execution be taken care by a seperate worker? ), Load all the jobs from current timestamp + 'N' time units
-	if s.AckLevel.Before(time.Now()) && s.ReadLevel.Before(time.Now()) {
+	// Case 1: ReadLevel and AckLevel are far in the past from current time ( Job scheduler crash or stopped ): Load all the jobs from the AckLevel to the current timestamp ( should thier execution be taken care by a seperate worker ), Load all the jobs from current timestamp + 'N' time units
+	if s.ackLevel.Before(time.Now()) && s.readLevel.Before(time.Now()) {
 		// Load all the jobs in the from AckLevel to current time.
 		// Async: Start the backlog job worker to execute the jobs in backlog
 		// Set current time as AckLevel and ReadLevel; Start loadin jobs from current time to next 'N' minutes
@@ -133,25 +139,24 @@ func (s *scheduler) Start() {
 
 		backlogJobWorker.Stop()
 
-		s.ReadLevel = time.Now().UTC()
-		s.AckLevel = time.Now().UTC()
 	}
-	// Case 3: ReadLevel or AckLevel are in the future; Alert for a drifted system clock; Ask users to sync clock; Provide instructions; Exit
-	if s.AckLevel.After(time.Now()) || s.ReadLevel.After(time.Now()) {
+	// Case 2: ReadLevel or AckLevel are in the future; Alert for a drifted system clock; Ask users to sync clock; Provide instructions; Exit
+	if s.ackLevel.After(time.Now()) || s.readLevel.After(time.Now()) {
 		fmt.Println("System clock is drifted. Please sync your clock with an NTP server and restart the scheduler.")
 		return
 	}
+
+	// Case 3: Fresh job scheduler instance with no jobs in the database: Both ReadLevel and AckLevel are at the current timestamp; Start loading jobs from current time to next 'N' minutes
+	s.readLevel = time.Now().UTC()
+	s.ackLevel = time.Now().UTC()
 	// Move the AckLevel and ReadLevel after the above step to their correct timestamp => Flush to DB
 	// Start jobExecutor as a go-routine
 	// Start monitorAckLevelandReadLevel as a go routine
-	s.buildHeap(s.ReadLevel, s.ReadLevel.Add(TimeWindow))
+	s.buildHeap(s.readLevel, s.readLevel.Add(TimeWindow))
 	s.wg.Add(2)
 	go s.jobExecutor()
 	go s.monitorAckLevelandReadLevel()
 	s.wg.Wait()
-
-	return
-
 }
 
 func (s *scheduler) Stop() {
