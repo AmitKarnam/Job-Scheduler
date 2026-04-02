@@ -209,6 +209,34 @@ func (j *Job) NextRun(after time.Time) (time.Time, bool, error) {
 // should be replaced by concrete job behaviour or by implementing a
 // separate jobs interface for specific job types.
 func (j *Job) Execute() error {
-	// TODO: implement actual execution logic (worker, HTTP call, etc.)
+	executor, ok := executionRegistry[j.Type]
+	if !ok {
+		return fmt.Errorf("no executor found for job type :%s", j.Type)
+	}
+
+	return executor.Execute(j)
+}
+
+type JobExecutor interface {
+	Execute(job *Job) error
+}
+
+var executionRegistry = map[JobType]JobExecutor{}
+
+func AddToRegistry(jobType JobType, jobExecutor JobExecutor) {
+	executionRegistry[jobType] = jobExecutor
+}
+
+type EmailJobExecutor struct{}
+
+func (e EmailJobExecutor) Execute(job Job) error {
+	// extract payload
+	// send email
+	return nil
+}
+
+type MobileNotificationJobExecutor struct{}
+
+func (m MobileNotificationJobExecutor) Execute(job Job) error {
 	return nil
 }
