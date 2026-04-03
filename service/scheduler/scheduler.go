@@ -8,6 +8,7 @@ import (
 	"github.com/AmitKarnam/Job-Scheduler/heap"
 	"github.com/AmitKarnam/Job-Scheduler/models"
 	"github.com/AmitKarnam/Job-Scheduler/repository"
+	"github.com/AmitKarnam/Job-Scheduler/service/jobexecutor"
 	"github.com/AmitKarnam/Job-Scheduler/worker/backlog"
 )
 
@@ -106,10 +107,11 @@ func (s *scheduler) jobExecutor() {
 		// TODO: This flow of job execution should be async in nature
 		case <-time.After(time.Until(jobToExecute.NextExecutionTime)):
 			// Execute the job
-			err := jobToExecute.Execute()
+			err := jobexecutor.ExecutionRegistry[jobToExecute.Type].Execute(&jobToExecute)
 			if err != nil {
-				// Handle error (e.g., log it, retry logic, etc.)
-				fmt.Printf("Error executing job: %v\n", err)
+				// Handle the error (e.g. log it, update job status in DB, etc.)
+				fmt.Printf("failed to execute job %s: %v\n", jobToExecute.ID, err)
+				continue
 			}
 			s.jobMinHeap.DeleteMin() // Remove the executed job from the heap
 			//TODO: If the job is recurring, compute its next execution time and update the DB entry for that job; It will be automatically be picked up by the monitorAckLevelandReadLevel and added to the heap when it's next_execution_time is within the ReadLevel and ReadLevel + window

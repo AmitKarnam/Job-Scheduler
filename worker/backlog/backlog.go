@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/AmitKarnam/Job-Scheduler/models"
+	jobexecutor "github.com/AmitKarnam/Job-Scheduler/service/jobExecutor"
 )
 
 // Backlog is responsible for managing the queue of jobs that are pending execution. It provides an interface for adding new jobs, retrieving jobs for execution, and updating the status of jobs after execution. The backlog ensures that jobs are executed in a timely manner and handles any necessary retries or error handling.
@@ -55,7 +56,7 @@ func (bl *backlog) worker(id int) {
 	for job := range bl.queue {
 		// Execute job
 		// Set it's next execution time based on the condition of the job
-		if err := job.Execute(); err != nil {
+		if err := jobexecutor.ExecutionRegistry[job.Type].Execute(&job); err != nil {
 			log.Printf("backlog worker %d: job execute error: %v", id, err)
 		}
 	}
